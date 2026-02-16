@@ -65,56 +65,93 @@ const App: React.FC = () => {
       isLoggedIn: false
     };
   });
-  
-  // Request Notification Permissions on mount
+
+  // Setup Channels and Listeners
   useEffect(() => {
-    const requestPerms = async () => {
+    const setupNativeChannels = async () => {
       if (Capacitor.isNativePlatform()) {
         try {
-          const perm = await LocalNotifications.requestPermissions();
-          if (perm.display !== 'granted') {
-             console.warn("User denied notifications - Alarms won't work in background");
-          }
-        } catch (e) { console.error("Permission request error", e); }
+          await LocalNotifications.requestPermissions();
+          
+          // ALARM: High priority, wakes phone
+          await LocalNotifications.createChannel({
+            id: 'examcrush-alarms',
+            name: 'Critical Study Alarms',
+            description: 'Full-screen ringing alarms',
+            importance: 5, // MAX priority
+            visibility: 1,
+            sound: 'focus_melody.mp3',
+            vibration: true,
+          });
+
+          // REMINDERS: Normal priority (5-min warnings)
+          await LocalNotifications.createChannel({
+            id: 'examcrush-routines',
+            name: 'Study Reminders',
+            description: 'Routine starts and 5-minute pre-warnings',
+            importance: 4, 
+            visibility: 1,
+            vibration: true,
+          });
+
+          // LISTENER 1: Triggered when notification is received (foreground)
+          LocalNotifications.addListener('localNotificationReceived', (notif) => {
+            if (notif.extra?.type === 'alarm') {
+              triggerRinging(notif.extra?.alarmId);
+            } else {
+              // Just a standard notification banner for 5-min warnings
+              setNotification({ title: notif.title || 'Reminder', message: notif.body || '' });
+            }
+          });
+
+          // LISTENER 2: Triggered when user taps the notification or fires from background
+          LocalNotifications.addListener('localNotificationActionPerformed', (action) => {
+            const notif = action.notification;
+            if (notif.extra?.type === 'alarm') {
+              triggerRinging(notif.extra?.alarmId);
+            }
+          });
+        } catch (e) { console.error("Native notification config error", e); }
       }
     };
-    requestPerms();
-  }, []);
+    setupNativeChannels();
+  }, [alarms]);
 
-  useEffect(() => localStorage.setItem('ec_syllabus', JSON.stringify(syllabus)), [syllabus]);
-  useEffect(() => localStorage.setItem('ec_sessions', JSON.stringify(sessions)), [sessions]);
-  useEffect(() => localStorage.setItem('ec_schedule', JSON.stringify(schedule)), [schedule]);
-  useEffect(() => localStorage.setItem('ec_resources', JSON.stringify(resources)), [resources]);
-  useEffect(() => localStorage.setItem('ec_alarms', JSON.stringify(alarms)), [alarms]);
-  useEffect(() => localStorage.setItem('ec_user', JSON.stringify(user)), [user]);
+  const triggerRinging = (alarmId: string) => {
+    const foundAlarm = alarms.find(a => a.id === alarmId);
+    if (foundAlarm) {
+      startLongAlarm(foundAlarm);
+      setRingingAlarm({ ...foundAlarm, type: 'alarm' });
+    }
+  };
+
+  useEffect(() => {
+    localStorage.setItem('ec_syllabus', JSON.stringify(syllabus));
+    localStorage.setItem('ec_sessions', JSON.stringify(sessions));
+    localStorage.setItem('ec_schedule', JSON.stringify(schedule));
+    localStorage.setItem('ec_resources', JSON.stringify(resources));
+    localStorage.setItem('ec_alarms', JSON.stringify(alarms));
+    localStorage.setItem('ec_user', JSON.stringify(user));
+  }, [syllabus, sessions, schedule, resources, alarms, user]);
 
   const startLongAlarm = async (item: any) => {
     const isNative = Capacitor.isNativePlatform();
-    const soundId = item.soundId || 'focus_melody.mp3';
-    const assetPath = `assets/${soundId}`;
-    const volume = item.volume ?? 0.6;
+    const assetPath = `assets/${item.soundId || 'focus_melody.mp3'}`;
+    const volume = item.volume ?? 0.8;
 
     if (isNative) {
       try {
-        // Fix: Removed 'isVerification' as it is not a valid property of PreloadOptions
-        await NativeAudio.preload({
-          assetId: 'alarm_active',
-          assetPath: assetPath,
-          audioChannelNum: 1
-        });
-        await NativeAudio.setVolume({ assetId: 'alarm_active', volume });
-        await NativeAudio.loop({ assetId: 'alarm_active' });
-        nativeAudioActiveRef.current = 'alarm_active';
-      } catch (e) {
-        console.error("Native audio failed, trying web fallback", e);
-        playWebAudio(assetPath, volume);
-      }
+        await NativeAudio.preload({ assetId: 'active_alarm', assetPath, audioChannelNum: 1 });
+        await NativeAudio.setVolume({ assetId: 'active_alarm', volume });
+        await NativeAudio.loop({ assetId: 'active_alarm' });
+        nativeAudioActiveRef.current = 'active_alarm';
+      } catch (e) { playWebAudio(assetPath, volume); }
     } else {
       playWebAudio(assetPath, volume);
     }
 
     if (autoStopTimeoutRef.current) clearTimeout(autoStopTimeoutRef.current);
-    autoStopTimeoutRef.current = setTimeout(() => stopAlarmSound(), 45000); 
+    autoStopTimeoutRef.current = setTimeout(() => stopAlarmSound(), 120000); // Ring for 2 minutes
   };
 
   const playWebAudio = (src: string, volume: number) => {
@@ -136,63 +173,34 @@ const App: React.FC = () => {
       } catch (e) {}
       nativeAudioActiveRef.current = null;
     }
-
     if (alarmAudioRef.current) {
       alarmAudioRef.current.pause();
       alarmAudioRef.current = null;
     }
-    
     if (autoStopTimeoutRef.current) clearTimeout(autoStopTimeoutRef.current);
-
-    if (ringingAlarm && ringingAlarm.repeatType === 'once') {
+    
+    if (ringingAlarm?.repeatType === 'once') {
       setAlarms(prev => prev.map(a => a.id === ringingAlarm.id ? { ...a, isEnabled: false } : a));
     }
     setRingingAlarm(null);
   };
 
+  // Immediate check when app opens to see if an alarm should be ringing right now
   useEffect(() => {
-    const checkEvents = () => {
+    const checkNow = () => {
       const now = new Date();
-      const currentH = now.getHours();
-      const currentM = now.getMinutes();
-      const currentDay = now.getDay();
-      const timeKey = `${currentH.toString().padStart(2, '0')}:${currentM.toString().padStart(2, '0')}`;
-      const minuteId = `${timeKey}-${now.getDate()}`;
-      const futureDate = new Date(now.getTime() + 5 * 60000);
-      const futureTimeKey = `${futureDate.getHours().toString().padStart(2, '0')}:${futureDate.getMinutes().toString().padStart(2, '0')}`;
-
-      alarms.forEach(alarm => {
-        if (!alarm.isEnabled) return;
-        const isCorrectDay = alarm.repeatType === 'once' || alarm.repeatType === 'daily' || 
-          (alarm.repeatType === 'custom' && alarm.repeatDays?.includes(currentDay));
-
-        if (isCorrectDay && alarm.time === timeKey && !notifiedRefs.current.has(`alarm-${alarm.id}-${minuteId}`)) {
-          startLongAlarm(alarm);
-          setRingingAlarm({ ...alarm, type: 'alarm' });
-          notifiedRefs.current.add(`alarm-${alarm.id}-${minuteId}`);
-        }
-      });
-
-      schedule.forEach(event => {
-        if (!event.days.includes(currentDay)) return;
-        if (event.startTime === timeKey && !notifiedRefs.current.has(`routine-start-${event.id}-${minuteId}`)) {
-          startLongAlarm(event); 
-          setRingingAlarm({ ...event, type: 'routine' });
-          notifiedRefs.current.add(`routine-start-${event.id}-${minuteId}`);
-        }
-        if (event.startTime === futureTimeKey && !notifiedRefs.current.has(`routine-remind-${event.id}-${minuteId}`)) {
-          setNotification({
-            title: "Upcoming Session",
-            message: `Your ${event.subject || ''} routine "${event.title}" starts in 5 mins!`
-          });
-          notifiedRefs.current.add(`routine-remind-${event.id}-${minuteId}`);
-        }
-      });
+      const h = now.getHours().toString().padStart(2, '0');
+      const m = now.getMinutes().toString().padStart(2, '0');
+      const timeKey = `${h}:${m}`;
+      const active = alarms.find(a => a.isEnabled && a.time === timeKey);
+      if (active && !ringingAlarm) {
+        triggerRinging(active.id);
+      }
     };
-
-    const interval = setInterval(checkEvents, 10000); 
+    checkNow();
+    const interval = setInterval(checkNow, 10000); // Also check every 10s while app is open
     return () => clearInterval(interval);
-  }, [alarms, schedule]);
+  }, [alarms, ringingAlarm]);
 
   const renderTabContent = () => {
     switch (activeTab) {
@@ -208,28 +216,35 @@ const App: React.FC = () => {
 
   return (
     <div className="flex flex-col h-screen max-w-md mx-auto bg-slate-50 shadow-2xl overflow-hidden relative">
+      {/* Full Screen Alarm UI - High priority */}
       {ringingAlarm && (
-        <div className="fixed inset-0 z-[200] bg-indigo-600 flex flex-col items-center justify-center p-8 text-white animate-in fade-in duration-300 text-center">
-          <div className="mb-8 relative">
+        <div className="fixed inset-0 z-[1000] flex flex-col items-center justify-center p-8 text-white text-center bg-indigo-600 animate-in fade-in zoom-in duration-300">
+          <div className="mb-12 relative">
             <div className="absolute inset-0 bg-white/20 rounded-full animate-ping"></div>
-            <div className="relative bg-white/20 p-8 rounded-full">
-              {ringingAlarm.type === 'routine' ? <CalendarDays className="w-16 h-16" /> : <AlarmClock className="w-16 h-16" />}
+            <div className="relative bg-white/20 p-10 rounded-full shadow-2xl">
+              <AlarmClock className="w-20 h-20 text-white" />
             </div>
           </div>
-          <h2 className="text-4xl font-black mb-2 tracking-tighter uppercase leading-none">
-            {ringingAlarm.type === 'routine' ? 'Routine Start!' : 'Focus Time!'}
+          <h2 className="text-5xl font-black mb-4 tracking-tighter uppercase leading-none italic">
+            STUDY TIME!
           </h2>
-          <div className="space-y-1 mb-12">
-            <p className="text-xl font-bold">{ringingAlarm.title || ringingAlarm.topic || 'New Session'}</p>
-            {ringingAlarm.subject && <p className="text-indigo-200 font-bold uppercase tracking-widest text-[10px]">{ringingAlarm.subject}</p>}
+          <div className="space-y-2 mb-16">
+            <p className="text-2xl font-bold opacity-90">{ringingAlarm.topic || 'New Session Starting'}</p>
+            {ringingAlarm.subject && <p className="text-indigo-200 font-black uppercase tracking-[0.3em] text-xs">{ringingAlarm.subject}</p>}
           </div>
-          <button onClick={stopAlarmSound} className="w-full bg-white text-indigo-600 py-5 rounded-3xl font-black text-lg uppercase tracking-[0.15em] shadow-2xl active:scale-95 transition-transform">Dismiss</button>
+          <button 
+            onClick={stopAlarmSound} 
+            className="w-full bg-white text-indigo-600 py-7 rounded-[40px] font-black text-2xl uppercase tracking-[0.2em] shadow-2xl active:scale-95 transition-all"
+          >
+            DISMISS ALARM
+          </button>
         </div>
       )}
 
+      {/* Standard Notification Toast */}
       {notification && (
-        <div className="absolute top-4 left-4 right-4 z-[100] animate-in slide-in-from-top-full duration-500">
-          <div className="bg-indigo-600 text-white p-4 rounded-2xl shadow-2xl border border-white/20 flex items-center justify-between">
+        <div className="absolute top-4 left-4 right-4 z-[500] animate-in slide-in-from-top-full duration-500">
+          <div className="bg-indigo-700 text-white p-4 rounded-2xl shadow-2xl border border-indigo-500 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="bg-white/20 p-2 rounded-xl"><Bell className="w-5 h-5" /></div>
               <div>
@@ -257,7 +272,9 @@ const App: React.FC = () => {
         <button onClick={() => setActiveTab('profile')} className={`flex transition-all ${activeTab === 'profile' ? 'ring-2 ring-indigo-500 ring-offset-2 rounded-full' : ''}`}><img src={user.avatar} className="w-9 h-9 rounded-full border-2 border-white shadow-md object-cover" alt="avatar" /></button>
       </header>
 
-      <main className="flex-1 overflow-y-auto custom-scrollbar p-4 pb-24">{renderTabContent()}</main>
+      <main className="flex-1 overflow-y-auto custom-scrollbar p-4 pb-24">
+        {renderTabContent()}
+      </main>
 
       <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white/80 backdrop-blur-md border-t flex justify-around py-2 safe-area-bottom z-50">
         <NavButton active={activeTab === 'dashboard'} icon={LayoutDashboard} label="Home" onClick={() => setActiveTab('dashboard')} />
