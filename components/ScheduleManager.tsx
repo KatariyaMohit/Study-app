@@ -33,25 +33,41 @@ const ScheduleManager: React.FC<Props> = ({ schedule, setSchedule }) => {
       days: selectedDays
     };
 
-    // Background Scheduling for Routine
     if (Capacitor.isNativePlatform()) {
       const [hours, minutes] = newStart.split(':').map(Number);
       const scheduleDate = new Date();
       scheduleDate.setHours(hours, minutes, 0, 0);
       if (scheduleDate <= new Date()) scheduleDate.setDate(scheduleDate.getDate() + 1);
 
+      const reminderDate = new Date(scheduleDate.getTime() - 5 * 60000);
+      const idBase = parseInt(eventId.slice(-6));
+
       try {
+        // Audible 5-minute warning
+        if (reminderDate > new Date()) {
+          await LocalNotifications.schedule({
+            notifications: [{
+              id: idBase + 200,
+              title: `Study Routine Starts Soon! ⏰`,
+              body: `Your ${newSubject || 'Study'} session for "${newTitle}" begins in 5 mins.`,
+              schedule: { at: reminderDate },
+              channelId: 'examcrush-routines',
+              sound: 'energy_boost.mp3', // Explicit audible sound
+              smallIcon: 'ic_stat_icon_config_sample',
+            }]
+          });
+        }
+
+        // Main Routine Alarm
         await LocalNotifications.schedule({
           notifications: [{
-            id: parseInt(eventId.slice(-6)),
+            id: idBase,
             title: `Routine Start! ⏰`,
             body: `${newSubject}: ${newTitle}`,
             schedule: { at: scheduleDate },
-            channelId: 'examcrush-alarms',
-            sound: 'focus_melody.mp3',
+            channelId: 'examcrush-routines',
+            sound: 'energy_boost.mp3',
             smallIcon: 'ic_stat_icon_config_sample',
-            actionTypeId: "",
-            extra: null
           }]
         });
       } catch (e) { console.error("Routine schedule error", e); }
