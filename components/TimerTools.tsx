@@ -34,13 +34,12 @@ const TimerTools: React.FC<Props> = ({ onSessionComplete, alarms, setAlarms, syl
     syllabus.length > 0 ? syllabus[0] : null
   );
   
-  // Alarm Form State
   const [showAddAlarm, setShowAddAlarm] = useState(false);
   const [editingAlarmId, setEditingAlarmId] = useState<string | null>(null);
   const [newAlarmTime, setNewAlarmTime] = useState('09:00');
   const [newAlarmTopic, setNewAlarmTopic] = useState('');
   const [newAlarmSubject, setNewAlarmSubject] = useState('');
-  const [newAlarmVolume, setNewAlarmVolume] = useState(0.5);
+  const [newAlarmVolume, setNewAlarmVolume] = useState(0.8);
   const [newSoundType, setNewSoundType] = useState<'prebuilt' | 'custom'>('prebuilt');
   const [newSoundId, setNewSoundId] = useState('focus_melody.mp3');
   const [newCustomSoundData, setNewCustomSoundData] = useState<string | undefined>(undefined);
@@ -60,35 +59,20 @@ const TimerTools: React.FC<Props> = ({ onSessionComplete, alarms, setAlarms, syl
 
     if (isNative && newSoundType === 'prebuilt') {
       try {
-        // Fix: Removed 'isVerification' as it is not a valid property of PreloadOptions
-        await NativeAudio.preload({
-          assetId: 'preview_sound',
-          assetPath: assetPath,
-          audioChannelNum: 1
-        });
+        await NativeAudio.preload({ assetId: 'preview_sound', assetPath, audioChannelNum: 1 });
         await NativeAudio.setVolume({ assetId: 'preview_sound', volume: newAlarmVolume });
         await NativeAudio.play({ assetId: 'preview_sound' });
-        // Auto-stop after 5 seconds to prevent infinite loop
         setTimeout(async () => {
-          try { 
-            await NativeAudio.stop({ assetId: 'preview_sound' }); 
-            await NativeAudio.unload({ assetId: 'preview_sound' }); 
-          } catch (e) {}
+          try { await NativeAudio.stop({ assetId: 'preview_sound' }); await NativeAudio.unload({ assetId: 'preview_sound' }); } catch (e) {}
         }, 5000);
-      } catch (e) {
-        console.error("Native preview failed, falling back to web", e);
-        webPreviewFallback(assetPath);
-      }
+      } catch (e) { webPreviewFallback(assetPath); }
     } else {
       webPreviewFallback(assetPath);
     }
   };
 
   const webPreviewFallback = (src: string) => {
-    if (previewAudioRef.current) {
-      previewAudioRef.current.pause();
-      previewAudioRef.current = null;
-    }
+    if (previewAudioRef.current) previewAudioRef.current.pause();
     try {
       const audio = new Audio(src);
       audio.volume = newAlarmVolume;
@@ -115,13 +99,7 @@ const TimerTools: React.FC<Props> = ({ onSessionComplete, alarms, setAlarms, syl
     if (isActive) {
       timerRef.current = setInterval(() => {
         if (mode === 'pomodoro') {
-          setTimeLeft((prev) => {
-            if (prev <= 1) {
-              handleFinish();
-              return 0;
-            }
-            return prev - 1;
-          });
+          setTimeLeft((prev) => (prev <= 1 ? (handleFinish(), 0) : prev - 1));
         } else if (mode === 'stopwatch') {
           setStopwatchTime((prev) => prev + 1);
         }
@@ -133,16 +111,12 @@ const TimerTools: React.FC<Props> = ({ onSessionComplete, alarms, setAlarms, syl
   }, [isActive, mode]);
 
   const handleFinish = () => {
-    const elapsedSeconds = mode === 'pomodoro' 
-      ? (initialTime - timeLeft) 
-      : stopwatchTime;
-
+    const elapsedSeconds = mode === 'pomodoro' ? (initialTime - timeLeft) : stopwatchTime;
     if (elapsedSeconds >= 30) {
-      const duration = Math.max(1, Math.round(elapsedSeconds / 60));
       onSessionComplete({ 
         id: Date.now().toString(), 
         date: new Date().toISOString(), 
-        durationMinutes: duration, 
+        durationMinutes: Math.max(1, Math.round(elapsedSeconds / 60)), 
         subject: currentFocus?.subject || 'General',
         topic: currentFocus?.title || 'Focused Study'
       });
@@ -150,91 +124,146 @@ const TimerTools: React.FC<Props> = ({ onSessionComplete, alarms, setAlarms, syl
     reset();
   };
 
-  const reset = () => {
-    setIsActive(false);
-    if (mode === 'pomodoro') setTimeLeft(initialTime);
-    else setStopwatchTime(0);
-  };
-
-  const setPreset = (mins: number) => {
-    const secs = mins * 60;
-    setInitialTime(secs);
-    setTimeLeft(secs);
-    setIsActive(false);
-  };
+  const reset = () => { setIsActive(false); if (mode === 'pomodoro') setTimeLeft(initialTime); else setStopwatchTime(0); };
+  const setPreset = (mins: number) => { setInitialTime(mins * 60); setTimeLeft(mins * 60); setIsActive(false); };
 
   const openAddForm = () => {
-    setEditingAlarmId(null);
-    setNewAlarmTime('09:00');
-    setNewAlarmTopic('');
-    setNewAlarmSubject('');
-    setNewAlarmVolume(0.5);
-    setNewSoundType('prebuilt');
-    setNewSoundId('focus_melody.mp3');
-    setNewCustomSoundData(undefined);
-    setNewCustomSoundName(undefined);
-    setNewRepeatType('once');
-    setNewRepeatDays([]);
-    setShowAddAlarm(true);
+    setEditingAlarmId(null); setNewAlarmTime('09:00'); setNewAlarmTopic(''); setNewAlarmSubject('');
+    setNewAlarmVolume(0.8); setNewSoundType('prebuilt'); setNewSoundId('focus_melody.mp3');
+    setNewCustomSoundData(undefined); setNewCustomSoundName(undefined); setNewRepeatType('once');
+    setNewRepeatDays([]); setShowAddAlarm(true);
   };
 
   const openEditForm = (alarm: Alarm) => {
-    setEditingAlarmId(alarm.id);
-    setNewAlarmTime(alarm.time);
+    setEditingAlarmId(alarm.id); 
+    setNewAlarmTime(alarm.time); 
     setNewAlarmTopic(alarm.topic || '');
-    setNewAlarmSubject(alarm.subject || '');
-    setNewAlarmVolume(alarm.volume ?? 0.5);
-    setNewSoundType(alarm.soundType);
+    setNewAlarmSubject(alarm.subject || ''); 
+    setNewAlarmVolume(alarm.volume ?? 0.8);
+    setNewSoundType(alarm.soundType); 
     setNewSoundId(alarm.soundId || 'focus_melody.mp3');
-    setNewCustomSoundData(alarm.customSoundData);
+    setNewCustomSoundData(alarm.customSoundData); 
     setNewCustomSoundName(alarm.customSoundName);
-    setNewRepeatType(alarm.repeatType);
+    setNewRepeatType(alarm.repeatType); 
     setNewRepeatDays(alarm.repeatDays || []);
     setShowAddAlarm(true);
   };
 
+  const getNextAlarmDate = (timeStr: string, repeat: string, customDays?: number[]) => {
+    const [h, m] = timeStr.split(':').map(Number);
+    const now = new Date();
+    const target = new Date();
+    // CRITICAL: Set seconds and milliseconds to 0 for exact timing
+    target.setHours(h, m, 0, 0);
+
+    if (repeat === 'once' || repeat === 'daily') {
+      if (target <= now) target.setDate(target.getDate() + 1);
+      return target;
+    }
+
+    if (repeat === 'custom' && customDays && customDays.length > 0) {
+      const today = now.getDay();
+      for (let i = 0; i < 8; i++) {
+        const checkDay = (today + i) % 7;
+        if (customDays.includes(checkDay)) {
+          const res = new Date();
+          res.setDate(now.getDate() + i);
+          res.setHours(h, m, 0, 0);
+          if (res > now) return res;
+        }
+      }
+    }
+    if (target <= now) target.setDate(target.getDate() + 1);
+    return target;
+  };
+
   const saveAlarm = async () => {
     if (!newAlarmTime) return;
+    
+    // Maintain same ID if editing
+    const alarmId = editingAlarmId || Date.now().toString();
+    const scheduledDate = getNextAlarmDate(newAlarmTime, newRepeatType, newRepeatDays);
+    const idInt = parseInt(alarmId.slice(-7));
 
-    // Schedule System Notification for background behavior
     if (Capacitor.isNativePlatform()) {
-      const [hours, minutes] = newAlarmTime.split(':').map(Number);
-      const scheduleDate = new Date();
-      scheduleDate.setHours(hours, minutes, 0, 0);
-      if (scheduleDate <= new Date()) scheduleDate.setDate(scheduleDate.getDate() + 1);
+      try {
+        // Cancel existing notifications for this alarm (Old time)
+        await LocalNotifications.cancel({ notifications: [{ id: idInt }, { id: idInt + 1000 }] });
 
-      await LocalNotifications.schedule({
-        notifications: [{
-          id: parseInt(editingAlarmId || Date.now().toString().slice(-6)),
-          title: `Focus Time! 📚`,
-          body: `${newAlarmSubject || 'Study'}: ${newAlarmTopic || 'New Session'}`,
-          schedule: { at: scheduleDate },
-          channelId: 'examcrush-alarms', // Linked to the sound channel
-          sound: newSoundId,
-          smallIcon: 'ic_stat_icon_config_sample',
-          actionTypeId: "",
-          extra: null
-        }]
-      });
+        // Calculate EXACTLY 5 minutes before
+        const reminderDate = new Date(scheduledDate.getTime() - 5 * 60000);
+
+        // 1. Schedule Pre-reminder (Strictly as notification)
+        if (reminderDate > new Date()) {
+          await LocalNotifications.schedule({
+            notifications: [{
+              id: idInt + 1000,
+              title: `Starting in 5 Minutes! 📚`,
+              body: `Your ${newAlarmSubject || 'Study'} session begins soon.`,
+              schedule: { at: reminderDate },
+              channelId: 'examcrush-routines', 
+              extra: { type: 'notification' }, // Strictly a notification
+              smallIcon: 'ic_stat_icon_config_sample',
+            }]
+          });
+        }
+
+        // 2. Schedule Main ALARM (Triggers Full Screen UI at exact time)
+        await LocalNotifications.schedule({
+          notifications: [{
+            id: idInt,
+            title: `Study Session Start! 🚀`,
+            body: `${newAlarmSubject}: ${newAlarmTopic}`,
+            schedule: { at: scheduledDate },
+            channelId: 'examcrush-alarms', 
+            sound: newSoundId,
+            extra: { alarmId: alarmId, type: 'alarm' }, // Flagged as ALARM
+            smallIcon: 'ic_stat_icon_config_sample',
+          }]
+        });
+      } catch (e) { console.error("Scheduling error", e); }
     }
 
     const alarmData: Alarm = {
-      id: editingAlarmId || Date.now().toString(),
-      time: newAlarmTime,
+      id: alarmId, 
+      time: newAlarmTime, 
       topic: newAlarmTopic.trim(),
-      subject: newAlarmSubject.trim(),
-      volume: newAlarmVolume,
+      subject: newAlarmSubject.trim(), 
+      volume: newAlarmVolume, 
       soundType: newSoundType,
-      soundId: newSoundId,
-      customSoundData: newCustomSoundData,
+      soundId: newSoundId, 
+      customSoundData: newCustomSoundData, 
       customSoundName: newCustomSoundName,
-      repeatType: newRepeatType,
-      repeatDays: newRepeatDays,
+      repeatType: newRepeatType, 
+      repeatDays: newRepeatDays, 
       isEnabled: true
     };
-    if (editingAlarmId) setAlarms(prev => prev.map(a => a.id === editingAlarmId ? alarmData : a));
-    else setAlarms(prev => [...prev, alarmData]);
+
+    // UPDATE STATE CORRECTLY
+    setAlarms(prev => {
+      const index = prev.findIndex(a => a.id === alarmId);
+      if (index !== -1) {
+        // UPDATE Existing
+        const updated = [...prev];
+        updated[index] = alarmData;
+        return updated;
+      } else {
+        // ADD New
+        return [...prev, alarmData];
+      }
+    });
+    
+    // Reset Form
     setShowAddAlarm(false);
+    setEditingAlarmId(null);
+  };
+
+  const deleteAlarm = async (id: string) => {
+    if (Capacitor.isNativePlatform()) {
+      const idInt = parseInt(id.slice(-7));
+      await LocalNotifications.cancel({ notifications: [{ id: idInt }, { id: idInt + 1000 }] });
+    }
+    setAlarms(prev => prev.filter(a => a.id !== id));
   };
 
   const radius = 80;
@@ -258,24 +287,8 @@ const TimerTools: React.FC<Props> = ({ onSessionComplete, alarms, setAlarms, syl
                 <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Recording Focus For</span>
              </div>
              <div className="relative">
-                <select 
-                  className="w-full bg-slate-50 border-none rounded-xl p-3.5 text-xs font-black text-slate-800 outline-none appearance-none focus:ring-2 focus:ring-indigo-500"
-                  value={currentFocus?.id || ''}
-                  onChange={(e) => {
-                    const selected = syllabus.find(s => s.id === e.target.value);
-                    if (selected) setCurrentFocus(selected);
-                  }}
-                  disabled={isActive}
-                >
-                  {syllabus.length === 0 ? (
-                    <option value="">No topics in syllabus yet</option>
-                  ) : (
-                    syllabus.map(topic => (
-                      <option key={topic.id} value={topic.id}>
-                        {topic.subject}: {topic.title}
-                      </option>
-                    ))
-                  )}
+                <select className="w-full bg-slate-50 border-none rounded-xl p-3.5 text-xs font-black text-slate-800 outline-none appearance-none focus:ring-2 focus:ring-indigo-500" value={currentFocus?.id || ''} onChange={(e) => { const s = syllabus.find(s => s.id === e.target.value); if (s) setCurrentFocus(s); }} disabled={isActive}>
+                  {syllabus.length === 0 ? <option value="">No topics added yet</option> : syllabus.map(t => <option key={t.id} value={t.id}>{t.subject}: {t.title}</option>)}
                 </select>
                 <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
              </div>
@@ -284,13 +297,7 @@ const TimerTools: React.FC<Props> = ({ onSessionComplete, alarms, setAlarms, syl
           {mode === 'pomodoro' && (
             <div className="flex gap-2 w-full justify-center">
               {PRESETS.map(p => (
-                <button 
-                  key={p} 
-                  onClick={() => setPreset(p)}
-                  className={`px-4 py-1.5 rounded-lg text-[10px] font-black transition-all ${initialTime === p * 60 ? 'bg-indigo-600 text-white shadow-lg' : 'bg-white text-slate-400 border border-slate-100'}`}
-                >
-                  {p}m
-                </button>
+                <button key={p} onClick={() => setPreset(p)} className={`px-4 py-1.5 rounded-lg text-[10px] font-black transition-all ${initialTime === p * 60 ? 'bg-indigo-600 text-white shadow-lg' : 'bg-white text-slate-400 border border-slate-100'}`}>{p}m</button>
               ))}
             </div>
           )}
@@ -298,49 +305,24 @@ const TimerTools: React.FC<Props> = ({ onSessionComplete, alarms, setAlarms, syl
           <div className="relative w-80 h-80 flex items-center justify-center">
             <svg className="absolute w-full h-full -rotate-90" viewBox="0 0 200 200">
               <circle cx="100" cy="100" r={radius} className="stroke-slate-50 fill-none" strokeWidth="5" />
-              {mode === 'pomodoro' && (
-                <circle 
-                  cx="100" cy="100" r={radius} 
-                  className="stroke-indigo-600 fill-none transition-all duration-1000" 
-                  strokeWidth="5" 
-                  strokeDasharray={circumference} 
-                  strokeDashoffset={circumference - (circumference * ((initialTime - timeLeft) / initialTime))} 
-                  strokeLinecap="round" 
-                />
-              )}
+              {mode === 'pomodoro' && <circle cx="100" cy="100" r={radius} className="stroke-indigo-600 fill-none transition-all duration-1000" strokeWidth="5" strokeDasharray={circumference} strokeDashoffset={circumference - (circumference * ((initialTime - timeLeft) / initialTime))} strokeLinecap="round" />}
             </svg>
             <div className="text-center z-10 flex flex-col items-center">
               <p className="text-6xl font-black text-slate-800 tracking-tighter tabular-nums leading-none">
-                {mode === 'pomodoro' 
-                  ? `${Math.floor(timeLeft / 60).toString().padStart(2, '0')}:${(timeLeft % 60).toString().padStart(2, '0')}` 
-                  : `${Math.floor(stopwatchTime / 60).toString().padStart(2, '0')}:${(stopwatchTime % 60).toString().padStart(2, '0')}`}
+                {mode === 'pomodoro' ? `${Math.floor(timeLeft / 60).toString().padStart(2, '0')}:${(timeLeft % 60).toString().padStart(2, '0')}` : `${Math.floor(stopwatchTime / 60).toString().padStart(2, '0')}:${(stopwatchTime % 60).toString().padStart(2, '0')}`}
               </p>
-              <p className="text-[10px] font-black text-indigo-400 uppercase mt-4 tracking-[0.2em]">
-                {isActive ? 'Session in Progress' : 'Start Focus Timer'}
-              </p>
+              <p className="text-[10px] font-black text-indigo-400 uppercase mt-4 tracking-[0.2em]">{isActive ? 'Session in Progress' : 'Start Focus Timer'}</p>
             </div>
           </div>
 
           <div className="flex flex-col items-center gap-6 w-full">
             <div className="flex gap-8 items-center">
-              <button onClick={reset} className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-200 transition-colors">
-                <RotateCcw className="w-5 h-5" />
-              </button>
-              <button onClick={() => setIsActive(!isActive)} className="w-20 h-20 bg-indigo-600 rounded-full flex items-center justify-center text-white shadow-xl shadow-indigo-100 hover:bg-indigo-700 transition-transform active:scale-95">
-                {isActive ? <Pause className="w-8 h-8" /> : <Play className="w-8 h-8 translate-x-1" />}
-              </button>
-              <button className="w-12 h-12 bg-slate-100 text-slate-400 rounded-full flex items-center justify-center" onClick={() => setMode('alarms')}>
-                <AlarmClock className="w-5 h-5" />
-              </button>
+              <button onClick={reset} className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-200 transition-colors"><RotateCcw className="w-5 h-5" /></button>
+              <button onClick={() => setIsActive(!isActive)} className="w-20 h-20 bg-indigo-600 rounded-full flex items-center justify-center text-white shadow-xl shadow-indigo-100 hover:bg-indigo-700 transition-transform active:scale-95">{isActive ? <Pause className="w-8 h-8" /> : <Play className="w-8 h-8 translate-x-1" />}</button>
+              <button className="w-12 h-12 bg-slate-100 text-slate-400 rounded-full flex items-center justify-center" onClick={() => setMode('alarms')}><AlarmClock className="w-5 h-5" /></button>
             </div>
-
             {((mode === 'pomodoro' && timeLeft < initialTime) || (mode === 'stopwatch' && stopwatchTime > 0)) && !isActive && (
-              <button 
-                onClick={handleFinish}
-                className="flex items-center gap-2 bg-emerald-500 text-white px-8 py-3.5 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-emerald-100 animate-in fade-in slide-in-from-bottom-2"
-              >
-                <CheckCircle className="w-4 h-4" /> Finish & Save Progress
-              </button>
+              <button onClick={handleFinish} className="flex items-center gap-2 bg-emerald-500 text-white px-8 py-3.5 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-emerald-100 animate-in fade-in slide-in-from-bottom-2"><CheckCircle className="w-4 h-4" /> Finish & Save Progress</button>
             )}
           </div>
         </>
@@ -354,46 +336,27 @@ const TimerTools: React.FC<Props> = ({ onSessionComplete, alarms, setAlarms, syl
           {showAddAlarm && (
             <div className="bg-white border border-indigo-100 rounded-3xl p-6 shadow-2xl space-y-5 animate-in zoom-in-95 duration-200">
               <div className="flex justify-between items-center">
-                <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">
-                  {editingAlarmId ? 'Edit Alarm' : 'Set New Alarm'}
-                </span>
-                <button onClick={() => setShowAddAlarm(false)} className="text-slate-300 hover:text-slate-500"><X className="w-5 h-5" /></button>
+                <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">{editingAlarmId ? 'Update Alarm' : 'Set New Alarm'}</span>
+                <button onClick={() => { setShowAddAlarm(false); setEditingAlarmId(null); }} className="text-slate-300 hover:text-slate-500"><X className="w-5 h-5" /></button>
               </div>
-              
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Time</label>
-                    <input type="time" className="w-full bg-slate-50 border-none rounded-xl p-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500" value={newAlarmTime} onChange={(e) => setNewAlarmTime(e.target.value)} />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Subject</label>
-                    <input type="text" placeholder="Science" className="w-full bg-slate-50 border-none rounded-xl p-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500" value={newAlarmSubject} onChange={(e) => setNewAlarmSubject(e.target.value)} />
-                  </div>
+                  <div className="space-y-1"><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Time</label><input type="time" className="w-full bg-slate-50 border-none rounded-xl p-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500" value={newAlarmTime} onChange={(e) => setNewAlarmTime(e.target.value)} /></div>
+                  <div className="space-y-1"><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Subject</label><input type="text" placeholder="Science" className="w-full bg-slate-50 border-none rounded-xl p-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500" value={newAlarmSubject} onChange={(e) => setNewAlarmSubject(e.target.value)} /></div>
                 </div>
-
-                <div className="space-y-1">
-                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Topic</label>
-                  <input type="text" placeholder="Organic Chemistry Review" className="w-full bg-slate-50 border-none rounded-xl p-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500" value={newAlarmTopic} onChange={(e) => setNewAlarmTopic(e.target.value)} />
-                </div>
-
+                <div className="space-y-1"><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Topic</label><input type="text" placeholder="Organic Chemistry Review" className="w-full bg-slate-50 border-none rounded-xl p-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500" value={newAlarmTopic} onChange={(e) => setNewAlarmTopic(e.target.value)} /></div>
+                
                 <div className="space-y-2">
                   <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Repeat Setting</label>
                   <div className="flex gap-2">
                     {['once', 'daily', 'custom'].map(type => (
-                      <button key={type} onClick={() => setNewRepeatType(type as any)} className={`flex-1 py-2 rounded-xl text-[9px] font-bold uppercase transition-all ${newRepeatType === type ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-50 text-slate-400'}`}>
-                        {type}
-                      </button>
+                      <button key={type} onClick={() => setNewRepeatType(type as any)} className={`flex-1 py-2 rounded-xl text-[9px] font-bold uppercase transition-all ${newRepeatType === type ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-50 text-slate-400'}`}>{type}</button>
                     ))}
                   </div>
                   {newRepeatType === 'custom' && (
                     <div className="flex justify-between pt-1">
                       {DAYS.map((day, idx) => (
-                        <button key={idx} onClick={() => {
-                          setNewRepeatDays(prev => prev.includes(idx) ? prev.filter(d => d !== idx) : [...prev, idx]);
-                        }} className={`w-8 h-8 rounded-full text-[9px] font-black transition-all ${newRepeatDays.includes(idx) ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-50 text-slate-300'}`}>
-                          {day}
-                        </button>
+                        <button key={idx} onClick={() => setNewRepeatDays(prev => prev.includes(idx) ? prev.filter(d => d !== idx) : [...prev, idx])} className={`w-8 h-8 rounded-full text-[9px] font-black transition-all ${newRepeatDays.includes(idx) ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-50 text-slate-300'}`}>{day}</button>
                       ))}
                     </div>
                   )}
@@ -410,62 +373,32 @@ const TimerTools: React.FC<Props> = ({ onSessionComplete, alarms, setAlarms, syl
                   </div>
                   <input type="file" ref={fileInputRef} className="hidden" accept="audio/*" onChange={handleFileUpload} />
                 </div>
-
                 <div className="space-y-2 bg-slate-50 p-4 rounded-2xl">
                   <div className="flex justify-between items-center mb-1">
-                    <div className="flex items-center gap-1.5">
-                       <Volume2 className="w-3 h-3 text-slate-400" />
-                       <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Volume</label>
-                    </div>
-                    {/* ENHANCED TEST SOUND BUTTON FOR ANDROID TOUCH REGISTRATION */}
-                    <button 
-                      onClick={(e) => { e.preventDefault(); previewAlarmSound(); }} 
-                      className="text-[9px] font-black text-indigo-600 uppercase tracking-widest bg-indigo-100/50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg active:scale-90 transition-all border border-indigo-200/50 shadow-sm"
-                    >
-                      Test Sound
-                    </button>
+                    <div className="flex items-center gap-1.5"><Volume2 className="w-3 h-3 text-slate-400" /><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Volume</label></div>
+                    <button onClick={(e) => { e.preventDefault(); previewAlarmSound(); }} className="text-[9px] font-black text-indigo-600 uppercase tracking-widest bg-indigo-100/50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg active:scale-90 transition-all border border-indigo-200/50 shadow-sm">Test Sound</button>
                   </div>
                   <input type="range" min="0" max="1" step="0.1" value={newAlarmVolume} onChange={(e) => setNewAlarmVolume(parseFloat(e.target.value))} className="w-full h-1.5 bg-indigo-100 rounded-lg appearance-none cursor-pointer accent-indigo-600" />
                 </div>
               </div>
-
-              <button onClick={saveAlarm} className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-indigo-100 active:scale-95 transition-transform">
-                {editingAlarmId ? 'Update Alarm' : 'Save Alarm'}
-              </button>
+              <button onClick={saveAlarm} className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-indigo-100 active:scale-95 transition-transform">{editingAlarmId ? 'Update Alarm' : 'Save Alarm'}</button>
             </div>
           )}
 
           <div className="space-y-4">
             {alarms.length === 0 ? (
-              <div className="text-center py-16 bg-white rounded-3xl border border-dashed border-slate-200">
-                <Bell className="w-8 h-8 text-slate-200 mx-auto mb-3" />
-                <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">No active reminders</p>
-              </div>
+              <div className="text-center py-16 bg-white rounded-3xl border border-dashed border-slate-200"><Bell className="w-8 h-8 text-slate-200 mx-auto mb-3" /><p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">No active reminders</p></div>
             ) : (
               alarms.map(alarm => (
                 <div key={alarm.id} className={`bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex items-center justify-between group transition-all ${!alarm.isEnabled && 'opacity-60 grayscale-[0.4]'}`}>
                   <div className="flex items-center gap-4">
-                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-colors ${alarm.isEnabled ? 'bg-indigo-50 text-indigo-600 shadow-sm shadow-indigo-50' : 'bg-slate-50 text-slate-300'}`}>
-                      {alarm.soundType === 'custom' ? <Music className="w-5 h-5" /> : <AlarmClock className="w-5 h-5" />}
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <p className="text-2xl font-black text-slate-800 leading-none">{alarm.time}</p>
-                        <span className="text-[8px] font-black uppercase text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded tracking-widest">
-                          {alarm.repeatType === 'once' ? 'Once' : alarm.repeatType === 'daily' ? 'Daily' : alarm.repeatDays?.map(d => DAYS[d]).join('')}
-                        </span>
-                      </div>
-                      <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest mt-1">
-                         {alarm.subject || 'Study'}: {alarm.topic || 'New Session'}
-                      </p>
-                    </div>
+                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-colors ${alarm.isEnabled ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-50 text-slate-300'}`}>{alarm.soundType === 'custom' ? <Music className="w-5 h-5" /> : <AlarmClock className="w-5 h-5" />}</div>
+                    <div><div className="flex items-center gap-2"><p className="text-2xl font-black text-slate-800 leading-none">{alarm.time}</p><span className="text-[8px] font-black uppercase text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded tracking-widest">{alarm.repeatType === 'once' ? 'Once' : alarm.repeatType === 'daily' ? 'Daily' : alarm.repeatDays?.map(d => DAYS[d]).join('')}</span></div><p className="text-[10px] font-black uppercase text-slate-400 tracking-widest mt-1">{alarm.subject || 'Study'}: {alarm.topic || 'New Session'}</p></div>
                   </div>
                   <div className="flex items-center gap-2">
                     <button onClick={() => openEditForm(alarm)} className="p-2.5 text-slate-300 hover:text-indigo-600 transition-colors"><Edit2 className="w-4 h-4" /></button>
-                    <button onClick={() => setAlarms(prev => prev.map(a => a.id === alarm.id ? { ...a, isEnabled: !a.isEnabled } : a))} className={`w-10 h-6 rounded-full relative transition-colors ${alarm.isEnabled ? 'bg-indigo-600' : 'bg-slate-200'}`}>
-                      <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${alarm.isEnabled ? 'left-5' : 'left-1'}`} />
-                    </button>
-                    <button onClick={() => setAlarms(alarms.filter(a => a.id !== alarm.id))} className="p-2.5 text-slate-200 hover:text-rose-500 transition-colors"><Trash2 className="w-4 h-4" /></button>
+                    <button onClick={() => setAlarms(prev => prev.map(a => a.id === alarm.id ? { ...a, isEnabled: !a.isEnabled } : a))} className={`w-10 h-6 rounded-full relative transition-colors ${alarm.isEnabled ? 'bg-indigo-600' : 'bg-slate-200'}`}><div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${alarm.isEnabled ? 'left-5' : 'left-1'}`} /></button>
+                    <button onClick={() => deleteAlarm(alarm.id)} className="p-2.5 text-slate-200 hover:text-rose-500 transition-colors"><Trash2 className="w-4 h-4" /></button>
                   </div>
                 </div>
               ))
